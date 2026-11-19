@@ -1,6 +1,8 @@
 import { BzChart } from 'https://cdn.jsdelivr.net/gh/bonezegei/bzUI/dist/bzChart.min.js';
 import { TinyLSTM } from './tiny-lstm.js';
 import { createUnrollGraph } from './unroll-graph.js';
+import { createWallet, resetWallet, equity, pnl, decide, execute, THRESHOLD, POSITION } from './wallet.js';
+import { initThemePicker } from './theme.js';
 
 const SYMBOL = 'BTCUSDT';
 const HORIZON = 20;         // candles to forecast
@@ -34,6 +36,13 @@ let recalcQueued = false;
 let lastNet = null;
 const INTERVAL_MS = { '1s': 1e3, '1m': 6e4, '5m': 3e5, '15m': 9e5, '1h': 36e5, '4h': 144e5, '1d': 864e5 };
 const predictions = new Map(); // open time of the predicted candle -> forecast of its close
+
+// ---- Paper trading: dummy wallet + bot status ----
+const BOT = Object.freeze({ STOPPED: 'stopped', RUNNING: 'running' });
+const wallet = createWallet();
+let botStatus = BOT.STOPPED;
+let evaluatedAt = null; // open time of the last closed candle the bot decided on
+let lastDecision = null;
 
 async function fetchCandles() {
   const url = `https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=${INTERVAL}&limit=${CANDLES}`;
@@ -292,6 +301,84 @@ function updateGraph() {
 
 buildGraph();
 
+// ---- Paper trading ----
+const botStatusEl = document.getElementById('bot-status');
+const startBtn = document.getElementById('bot-start');
+const stopBtn = document.getElementById('bot-stop');
+const resetBtn = document.getElementById('bot-reset');
+const signalEl = document.getElementById('bot-signal');
+const tradesBody = document.getElementById('trades-body');
+const emptyRow = document.getElementById('trades-empty');
+let renderedTrades = -1;
+const usd = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pct = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v * 100).toFixed(3)}%`;
+const signed = (v) => `${v >= 0 ? '+' : '−'}${usd(Math.abs(v))}`;
+
+/** Decides once per new closed candle: forecast end vs the latest close, executed at that close. */
+function evaluateBot() {
+  const last = candles[candles.length - 1];
+  if (botStatus !== BOT.RUNNING || last.time === evaluatedAt) return;
+  evaluatedAt = last.time;
+  const price = last.c; // closes[closes.length - 1]
+  lastDecision = { ...decide({ lastClose: price, forecast: forecast[HORIZON - 1], position: wallet.position }), time: last.time, price };
+  execute(wallet, lastDecision.signal, { price, time: last.time, change: lastDecision.change });
+}
+
+function setText(id, text) {
+  document.getElementById(id).textContent = text;
+}
+
+function renderWallet() {
+  const price = candles.length ? candles[candles.length - 1].c : 0;
+  const p = price ? pnl(wallet, price) : 0;
+  setText('w-usdt', usd(wallet.usdt));
+  setText('w-btc', wallet.btc.toFixed(8));
+  setText('w-position', wallet.position === POSITION.BTC ? 'Holding BTC' : 'Holding cash');
+  setText('w-equity', price ? usd(equity(wallet, price)) : usd(wallet.usdt));
+  const pnlEl = document.getElementById('w-pnl');
+  pnlEl.textContent = `${signed(p)} (${pct(p / wallet.initialUsdt)})`;
+  pnlEl.dataset.sign = p > 0 ? 'up' : p < 0 ? 'down' : 'flat';
+
+  botStatusEl.textContent = botStatus === BOT.RUNNING ? 'Running' : 'Stopped';
+  botStatusEl.dataset.state = botStatus;
+  startBtn.disabled = botStatus === BOT.RUNNING;
+  stopBtn.disabled = botStatus === BOT.STOPPED;
+
+  signalEl.textContent = lastDecision
+    ? `Last signal ${lastDecision.signal} at ${fmtTime(lastDecision.time)} · forecast ${pct(lastDecision.change)} vs close ${usd(lastDecision.price)} (threshold ±${(THRESHOLD * 100).toFixed(2)}%)`
+    : botStatus === BOT.RUNNING ? 'Waiting for the next closed candle…' : 'Bot stopped. Press Start to trade on the next closed candle.';
+
+  if (renderedTrades === wallet.trades.length) return; // the table only changes when a trade is added or reset
+  renderedTrades = wallet.trades.length;
+  emptyRow.hidden = renderedTrades > 0;
+  tradesBody.replaceChildren(emptyRow, ...wallet.trades.toReversed().map((t) => {
+    const tr = document.createElement('tr');
+    tr.dataset.side = t.side;
+    const cells = [fmtTime(t.time), t.side, usd(t.price), t.qty.toFixed(8), pct(t.change), usd(t.usdt), t.btc.toFixed(8), usd(t.equity)];
+    for (const text of cells) tr.append(Object.assign(document.createElement('td'), { textContent: text }));
+    return tr;
+  }));
+}
+
+startBtn.addEventListener('click', () => {
+  botStatus = BOT.RUNNING;
+  evaluatedAt = null; // decide on the newest closed candle right away
+  renderWallet();
+});
+stopBtn.addEventListener('click', () => {
+  botStatus = BOT.STOPPED;
+  renderWallet();
+});
+resetBtn.addEventListener('click', () => {
+  botStatus = BOT.STOPPED;
+  resetWallet(wallet);
+  lastDecision = null;
+  renderWallet();
+});
+
+initThemePicker(document.getElementById('theme-picker'));
+renderWallet();
+
 // ---- Live loop ----
 function render() {
   const prevView = chart.view;
@@ -316,6 +403,8 @@ async function tick() {
     if (!model) resetModel();
     forecast = trainAndForecast(closes, candles[candles.length - 1].time);
     predictions.set(candles[candles.length - 1].time + INTERVAL_MS[INTERVAL], forecast[0]);
+    evaluateBot();
+    renderWallet();
     render();
     updateText();
     updateAccuracy();

@@ -45,16 +45,84 @@
     .ug-stage { position: relative; height: 420px; border: 1px solid var(--bz-border, #e5e7eb); border-radius: var(--bz-radius-md, 8px); overflow: hidden; touch-action: none; }
     .ug-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
     .ug-canvas:focus-visible { outline: 2px solid var(--bz-focus-ring, #2563eb); outline-offset: -2px; }
+    h1, h2 { text-wrap: balance; }
+    p { text-wrap: pretty; }
+
+    .theme-picker { display: inline-flex; border: 1px solid var(--bz-border); border-radius: var(--bz-radius-md, 8px); overflow: hidden; }
+    .theme-picker button { width: 40px; height: 40px; display: grid; place-items: center; border: 0; background: transparent; color: var(--bz-text-muted); cursor: pointer; }
+    .theme-picker button + button { border-left: 1px solid var(--bz-border); }
+    .theme-picker button[aria-pressed="true"] { background: var(--bz-primary-soft); color: var(--bz-primary); }
+    .theme-picker button:focus-visible { outline: 2px solid var(--bz-focus-ring, #2563eb); outline-offset: -2px; }
+    .theme-picker svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+    .bot-head { display: flex; flex-wrap: wrap; gap: var(--bz-space-3); align-items: center; justify-content: space-between; }
+    .bot-actions { display: flex; flex-wrap: wrap; gap: var(--bz-space-2); }
+    .bot-actions .bz-btn { min-height: 44px; }
+    #bot-status { font-weight: 600; padding: 2px 10px; border-radius: var(--bz-radius-pill, 999px); background: var(--bz-surface-2); }
+    #bot-status[data-state="running"] { background: var(--bz-success-bg); color: var(--bz-success); }
+    .wallet-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--bz-space-4); margin: 0; }
+    .wallet-stats div { display: flex; flex-direction: column; gap: 2px; }
+    .wallet-stats dt { font-size: var(--bz-font-size-sm); color: var(--bz-text-muted); }
+    .wallet-stats dd { margin: 0; font-size: var(--bz-font-size-xl); font-weight: 600; font-variant-numeric: tabular-nums; }
+    #w-pnl[data-sign="up"] { color: var(--bz-success); }
+    #w-pnl[data-sign="down"] { color: var(--bz-danger); }
+    .trades-wrap { overflow-x: auto; max-height: 360px; overflow-y: auto; }
+    .trades-wrap table { width: 100%; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .trades-wrap th { position: sticky; top: 0; background: var(--bz-bg-card, var(--bz-surface)); text-align: right; }
+    .trades-wrap td { text-align: right; }
+    .trades-wrap th:nth-child(-n+2), .trades-wrap td:nth-child(-n+2) { text-align: left; }
+    .trades-wrap tr[data-side="BUY"] td:nth-child(2) { color: var(--bz-success); font-weight: 600; }
+    .trades-wrap tr[data-side="SELL"] td:nth-child(2) { color: var(--bz-danger); font-weight: 600; }
+    #trades-empty td { text-align: left; color: var(--bz-text-muted); white-space: normal; }
+
+    .site-footer { margin-top: var(--bz-space-8); padding: var(--bz-space-4) 0; border-top: 1px solid var(--bz-border); font-size: var(--bz-font-size-sm); color: var(--bz-text-muted); }
+    .site-footer p { margin: 0; }
+    .site-footer a { color: var(--bz-text); display: inline-block; min-height: 44px; line-height: 44px; }
   </style>
 </head>
 <body>
   <main class="bz-container btc-page">
     <header class="bz-flex bz-justify-between bz-items-center bz-wrap bz-gap-4 bz-mb-6">
       <div>
-        <h1 class="bz-text-3xl bz-font-bold bz-m-0">BTC/USDT · LSTM forecast</h1>
-        <p class="bz-text-muted bz-m-0">Binance public klines, the selected number of recent candles (up to 1000). Vertical lines mark the LSTM input window; the line after the last candle is the forecast.</p>
+        <h1 class="bz-text-3xl bz-font-bold bz-m-0">BTC/USDT · LSTM paper-trading bot</h1>
+        <p class="bz-text-muted bz-m-0">A tiny LSTM forecasts Binance public klines and trades a dummy wallet. No exchange account, no API keys, no real money.</p>
+      </div>
+      <div id="theme-picker" class="theme-picker" role="group" aria-label="Theme">
+        <button type="button" value="system" aria-label="System" title="System" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></button>
+        <button type="button" value="light" aria-label="Light" title="Light" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
+        <button type="button" value="dark" aria-label="Dark" title="Dark" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
       </div>
     </header>
+
+    <section class="bz-card btc-card bz-mb-6" aria-labelledby="t-bot">
+      <div class="bot-head">
+        <h2 id="t-bot" class="bz-text-lg bz-font-semibold bz-m-0">Dummy account <span id="bot-status" data-state="stopped" role="status">Stopped</span></h2>
+        <div class="bot-actions">
+          <button type="button" id="bot-start" class="bz-btn bz-btn-primary">Start bot</button>
+          <button type="button" id="bot-stop" class="bz-btn bz-btn-outline" disabled>Stop</button>
+          <button type="button" id="bot-reset" class="bz-btn bz-btn-outline">Reset to 10,000 USDT</button>
+        </div>
+      </div>
+      <dl class="wallet-stats">
+        <div><dt>USDT</dt><dd id="w-usdt">10,000.00</dd></div>
+        <div><dt>BTC</dt><dd id="w-btc">0.00000000</dd></div>
+        <div><dt>Position</dt><dd id="w-position">Holding cash</dd></div>
+        <div><dt>Equity (USDT)</dt><dd id="w-equity">10,000.00</dd></div>
+        <div><dt>Net PnL (USDT)</dt><dd id="w-pnl" data-sign="flat">+0.00 (+0.000%)</dd></div>
+      </dl>
+      <p id="bot-signal" class="bz-text-muted bz-m-0" role="status"></p>
+      <h3 class="bz-text-md bz-font-semibold bz-m-0">Simulated trades</h3>
+      <div class="trades-wrap">
+        <table class="bz-table bz-table-compact">
+          <thead>
+            <tr><th scope="col">Candle (UTC)</th><th scope="col">Side</th><th scope="col">Price</th><th scope="col">Qty (BTC)</th><th scope="col">Forecast</th><th scope="col">USDT after</th><th scope="col">BTC after</th><th scope="col">Equity</th></tr>
+          </thead>
+          <tbody id="trades-body">
+            <tr id="trades-empty"><td colspan="8">No trades yet. Start the bot and wait for a forecast past ±0.05%.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
 
     <section class="bz-card btc-card" aria-labelledby="t-chart">
       <div class="btc-controls">
@@ -107,7 +175,7 @@
         <p id="forecast" class="bz-font-semibold" role="status"></p>
         <p id="accuracy" role="status"></p>
       </div>
-      <p class="bz-text-muted bz-m-0">Educational demo only. A tiny LSTM on 1-second prices is not a trading signal.</p>
+      <p class="bz-text-muted bz-m-0">Educational demo only. Trades are simulated against the dummy account above; a tiny LSTM on 1-second prices is not real trading advice.</p>
     </section>
 
     <section class="bz-card btc-net bz-mt-6" aria-labelledby="t-net">
@@ -131,6 +199,10 @@
       </div>
     </section>
   </main>
+
+  <footer class="site-footer bz-container">
+    <p>Built by <a href="https://github.com/Jevoel16">Sprucetrap</a> on <a href="https://github.com/msuiit-ph/BZUI-LSTM-BTCUSDT">msuiit-ph/BZUI-LSTM-BTCUSDT</a>. <a href="https://github.com/Jevoel16/BZUI-LSTM-BTCUSDT/blob/main/LICENSE">MIT License</a>.</p>
+  </footer>
 
   <div id="ug-tip" class="bz-tooltip bz-chart-tooltip" aria-hidden="true" hidden></div>
 
